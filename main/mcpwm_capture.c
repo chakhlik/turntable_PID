@@ -1,47 +1,51 @@
 #include "mcpwm_capture.h"
-#include "driver/mcpwm_cap.h"
+#include "driver/gpio.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
-static const char *TAG = "MCPWM";
+extern QueueHandle_t xUdpQueue; // Объявлена в udp_telemetry.c
+static const char *TAG = "CAPTURE";
 
 // Очередь для передачи данных из ISR в задачу UDP
 QueueHandle_t xPulseQueue = NULL;
 
 // Переменные ISR
-static volatile uint32_t last_capture_val = 0;
-static volatile uint8_t  pulse_index = 0;
+static volatile int64_t last_capture_us = 0;
+static volatile uint16_t pulse_index = 0;
 
 // Порог для определения нулевой метки (широкого зазора)
-#define ZERO_MARK_THRESHOLD_US  18000
+#define ZERO_MARK_THRESHOLD_US  9500 // 18000 for 144 wheel
 
-// Обработчик прерывания MCPWM Capture
-static bool IRAM_ATTR mcpwm_capture_isr_handler(mcpwm_cap_channel_handle_t cap_channel,
-                                                 const mcpwm_capture_event_data_t *edata,
-                                                 void *user_data)
+// GPIO пин датчика
+static gpio_num_t capture_gpio = GPIO_NUM_19;
+
+// Обработчик прерывания GPIO
+static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
-    uint32_t current_capture = edata->cap_value;
+    // Получаем текущее время в микросекундах
+    int64_t current_time_us = esp_timer_get_time();
     
     // Вычисляем период
-    uint32_t period = current_capture - last_capture_val;
-    last_capture_val = current_capture;
+    int64_t period_us = current_time_us - last_capture_us;
+    last_capture_us = current_time_us;
     
     // Защита от переполнения при первом запуске
-    if (period > 100000) {
-        period = 0; 
+    if (period_us > 100000 || period_us < 0) {
+        period_us = 0; 
     }
     
     pulse_data_t data;
-    data.period_us = period;
+    data.period_us = (uint32_t)period_us;
     data.is_zero_mark = false;
     
-    if (period > ZERO_MARK_THRESHOLD_US) {
+    if (period_us > ZERO_MARK_THRESHOLD_US) {
         pulse_index = 0;
         data.is_zero_mark = true;
     } else {
         pulse_index++;
-        if (pulse_index >= 144) {
+        if (pulse_index >= 288) {  // <-- Было 144
             pulse_index = 0;
         }
     }
@@ -50,56 +54,44 @@ static bool IRAM_ATTR mcpwm_capture_isr_handler(mcpwm_cap_channel_handle_t cap_c
     
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xQueueSendFromISR(xPulseQueue, &data, &xHigherPriorityTaskWoken);
+    // Отправляем копию данных в очередь для UDP телеметрии
+    if (xUdpQueue != NULL) {
+        xQueueSendFromISR(xUdpQueue, &data, &xHigherPriorityTaskWoken);
+    }
     
     if (xHigherPriorityTaskWoken) {
         portYIELD_FROM_ISR();
     }
-    
-    return false;
 }
 
 void mcpwm_capture_init(gpio_num_t gpio_num)
 {
-    ESP_LOGI(TAG, "Initializing MCPWM Capture on GPIO %d", gpio_num);
+    ESP_LOGI(TAG, "Initializing GPIO Capture on GPIO %d", gpio_num);
     
+    capture_gpio = gpio_num;
+    
+    // Создаем очередь
     xPulseQueue = xQueueCreate(64, sizeof(pulse_data_t));
     if (xPulseQueue == NULL) {
         ESP_LOGE(TAG, "Failed to create queue");
         return;
     }
     
-    // 1. Создаем таймер захвата (Capture Timer)
-    mcpwm_cap_timer_handle_t cap_timer = NULL;
-    mcpwm_capture_timer_config_t cap_timer_config = {
-        .group_id = 0,
-        .clk_src = MCPWM_CAPTURE_CLK_SRC_DEFAULT,
-        .resolution_hz = 1000000,  // 1 МГц -> 1 мкс разрешение
+    // Настраиваем GPIO как вход
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_POSEDGE,  // Прерывание по нарастающему фронту
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = (1ULL << gpio_num),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
     };
-    ESP_ERROR_CHECK(mcpwm_new_capture_timer(&cap_timer_config, &cap_timer));
-    ESP_ERROR_CHECK(mcpwm_capture_timer_enable(cap_timer));
-    ESP_ERROR_CHECK(mcpwm_capture_timer_start(cap_timer));
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
     
-    // 2. Создаем канал захвата (Capture Channel)
-    mcpwm_cap_channel_handle_t cap_channel = NULL;
-    mcpwm_capture_channel_config_t cap_channel_config = {
-        .gpio_num = gpio_num,
-        .prescale = 1,
-        // В ESP-IDF v5.x настройки фронтов находятся внутри структуры flags
-        .flags = {
-            .pos_edge = true,   // Реагируем на нарастающий фронт
-            .neg_edge = false,  // Не реагируем на спадающий
-        },
-    };
-    ESP_ERROR_CHECK(mcpwm_new_capture_channel(cap_timer, &cap_channel_config, &cap_channel));
+    // Устанавливаем ISR сервис
+    ESP_ERROR_CHECK(gpio_install_isr_service(0));
     
-    // 3. Регистрируем ISR через колбэки
-    mcpwm_capture_event_callbacks_t cbs = {
-        .on_cap = mcpwm_capture_isr_handler,
-    };
-    ESP_ERROR_CHECK(mcpwm_capture_channel_register_event_callbacks(cap_channel, &cbs, NULL));
+    // Регистрируем обработчик прерывания
+    ESP_ERROR_CHECK(gpio_isr_handler_add(gpio_num, gpio_isr_handler, NULL));
     
-    // 4. Включаем канал
-    ESP_ERROR_CHECK(mcpwm_capture_channel_enable(cap_channel));
-    
-    ESP_LOGI(TAG, "MCPWM Capture initialized successfully. Resolution: 1 us");
+    ESP_LOGI(TAG, "GPIO Capture initialized successfully. Resolution: 1 us (SYSTIMER)");
 }

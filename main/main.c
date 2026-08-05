@@ -6,7 +6,11 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
-#include "wifi_ap.h"
+#include "wifi_sta.h"
+#include "mqtt_tools.h"
+#include "fsm.h"
+#include "pid_controller.h"
+#include "dac_control.h"
 #include "mcpwm_capture.h"
 #include "udp_telemetry.h"
 
@@ -14,9 +18,9 @@ static const char *TAG = "MAIN";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== Turntable PID - Iteration 1 ===");
+    ESP_LOGI(TAG, "=== Turntable PID - FSM + LUT ===");
     
-    // 1. Инициализация NVS (обязательно для Wi-Fi)
+    // 1. Инициализация NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -24,22 +28,39 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // 2. Запуск Wi-Fi в режиме точки доступа (AP Mode)
-    // Это создаст сеть "TurntablePID" с паролем "12345678"
-    // IP-адрес ESP32 будет 192.168.4.1
-    wifi_ap_init();
+    // 2. WiFi STA
+    wifi_sta_init();
     
-    // Ждем подключения к Wi-Fi (или просто даем время на старт)
-    vTaskDelay(pdMS_TO_TICKS(2000));
-    ESP_LOGI(TAG, "Wi-Fi AP started. SSID: TurntablePID, Password: 12345678");
-    ESP_LOGI(TAG, "ESP32 IP: 192.168.4.1");
+    // Ждем подключения WiFi
+    int retry = 0;
+    while (!wifi_sta_is_connected() && retry < 20) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        retry++;
+    }
+    
+    if (!wifi_sta_is_connected()) {
+        ESP_LOGE(TAG, "Failed to connect to WiFi");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "WiFi connected");
 
-    // 3. Инициализация MCPWM Capture
-    // Пин датчика скорости (замените на ваш реальный пин!)
-    mcpwm_capture_init(GPIO_NUM_18);
+    // 3. MQTT
+    my_mqtt_client_init();
     
-    // 4. Запуск задачи отправки телеметрии по UDP
-    // Привязываем к Core 0 (RT-ядро)
+    // 4. DAC
+    dac_init();
+    
+    // 5. PID
+    pid_init();
+    
+    // 6. Capture
+    mcpwm_capture_init(GPIO_NUM_19);
+    
+    // 7. FSM
+    fsm_init();
+    
+    // Задачи
     xTaskCreatePinnedToCore(
         udp_telemetry_task,
         "udp_telemetry",
@@ -47,12 +68,41 @@ void app_main(void)
         NULL,
         5,
         NULL,
-        0  // Core 0
+        0
     );
     
-    ESP_LOGI(TAG, "System started. Waiting for pulses...");
+    xTaskCreatePinnedToCore(
+        pid_task,
+        "pid_task",
+        4096,
+        NULL,
+        15,
+        NULL,
+        0
+    );
     
-    // Основной цикл ничего не делает, вся работа в задачах
+    xTaskCreatePinnedToCore(
+        fsm_task,
+        "fsm_task",
+        4096,
+        NULL,
+        10,
+        NULL,
+        1
+    );
+    
+    xTaskCreatePinnedToCore(
+        lut_calibration_task,
+        "lut_cal",
+        4096,
+        NULL,
+        8,
+        NULL,
+        1
+    );
+    
+    ESP_LOGI(TAG, "System started");
+    
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

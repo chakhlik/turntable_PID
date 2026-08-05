@@ -7,12 +7,13 @@
 #include "lwip/netdb.h"
 
 static const char *TAG = "UDP";
+QueueHandle_t xUdpQueue = NULL;
 
-#define DEST_IP_ADDR    "192.168.4.100"
+#define DEST_IP_ADDR    "192.168.1.78"
 #define DEST_PORT       5005
 
 // Очередь объявлена в mcpwm_capture.c, делаем её видимой
-extern QueueHandle_t xPulseQueue;
+// extern QueueHandle_t xPulseQueue; заменяем на отдельную очередь
 
 void udp_telemetry_task(void *pvParameters)
 {
@@ -23,6 +24,11 @@ void udp_telemetry_task(void *pvParameters)
         ESP_LOGE(TAG, "Failed to create socket: errno %d", errno);
         vTaskDelete(NULL);
         return;
+    }
+
+    // Создаем очередь специально для UDP (размер 64)
+    if (xUdpQueue == NULL) {
+        xUdpQueue = xQueueCreate(64, sizeof(pulse_data_t));
     }
     
     struct sockaddr_in dest_addr;
@@ -36,7 +42,7 @@ void udp_telemetry_task(void *pvParameters)
     uint32_t packet_count = 0;
     
     while (1) {
-        if (xQueueReceive(xPulseQueue, &data, pdMS_TO_TICKS(100)) == pdTRUE) {
+        if (xQueueReceive(xUdpQueue, &data, pdMS_TO_TICKS(100)) == pdTRUE) {
             char udp_buf[128];
             int len = snprintf(udp_buf, sizeof(udp_buf), "%lu,%lu,%u,%d\n",
                                (unsigned long)packet_count++,
@@ -46,9 +52,10 @@ void udp_telemetry_task(void *pvParameters)
             
             int err = sendto(sock, udp_buf, len, 0, 
                            (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-            if (err < 0) {
-                ESP_LOGE(TAG, "Send failed: errno %d", errno);
-            }
+            // закоментировано для экономии ресурсов
+            //if (err < 0) {
+            //    ESP_LOGE(TAG, "Send failed: errno %d", errno);
+            //}
         }
     }
     

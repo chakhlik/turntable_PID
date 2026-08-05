@@ -7,7 +7,7 @@
 // Вынесена в заголовочный файл, так как используется и в mcpwm_capture.c, и в udp_telemetry.c
 typedef struct {
     uint32_t period_us;      // Измеренный период в микросекундах
-    uint8_t  pulse_index;    // Индекс импульса (0..143)
+    uint16_t  pulse_index;    // Индекс импульса (0..287)
     bool     is_zero_mark;   // Флаг: это был широкий зазор (нулевая метка)
 } pulse_data_t;
 
