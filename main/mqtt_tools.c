@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "fsm.h"
 #include "pid_controller.h"
+#include "dac_control.h"
 
 static const char *TAG = "MQTT";
 
@@ -25,6 +26,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             esp_mqtt_client_subscribe(client, "turntable/speed", 1);
             esp_mqtt_client_subscribe(client, "turntable/pid_mode", 1);
             esp_mqtt_client_subscribe(client, "turntable/pid_ki", 1);
+            esp_mqtt_client_subscribe(client, "turntable/set_dac", 1);
             break;
             
         case MQTT_EVENT_DISCONNECTED:
@@ -62,6 +64,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                 memcpy(data_buf, event->data, event->data_len < 31 ? event->data_len : 31);
                 float ki = atof(data_buf);
                 pid_set_ki(ki);
+            } else if (strncmp(event->topic, "turntable/set_dac", event->topic_len) == 0) {
+                // Парсим значение DAC из данных
+                char data_buf[32] = {0};
+                memcpy(data_buf, event->data, event->data_len < 31 ? event->data_len : 31);
+                uint16_t set_dac = atoi(data_buf);
+                dac_set_value(set_dac);
             }
             break;
             

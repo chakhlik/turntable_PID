@@ -58,6 +58,18 @@ void pid_set_mode(pid_mode_t mode)
     current_mode = mode;
     const char* mode_str[] = {"OFF", "ON", "LUT_CALIBRATION"};
     ESP_LOGI(TAG, "PID mode set to: %s", mode_str[mode]);
+    switch (current_mode) {
+        case PID_MODE_OFF:
+            pid_stop();
+            break;
+        case PID_MODE_ON:
+            pid_start();
+            break;
+        case PID_MODE_LUT_CALIBRATION:
+            pid_stop();
+            break;
+    }
+
 }
 
 void pid_set_target_speed(uint8_t speed)

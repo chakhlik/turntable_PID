@@ -45,20 +45,22 @@ void app_main(void)
     
     ESP_LOGI(TAG, "WiFi connected");
 
-    // 3. MQTT
-    my_mqtt_client_init();
     
-    // 4. DAC
+    
+    // 3. DAC
     dac_init();
     
-    // 5. PID
+    // 4. PID
     pid_init();
     
-    // 6. Capture
+    // 5. Capture
     mcpwm_capture_init(GPIO_NUM_19);
     
-    // 7. FSM
+    // 6. FSM
     fsm_init();
+
+    // 7. MQTT
+    my_mqtt_client_init();
     
     // Задачи
     xTaskCreatePinnedToCore(
