@@ -13,7 +13,7 @@ static const char *TAG = "PID";
 
 #define TARGET_PERIOD_33  6250  // мкс
 #define TARGET_PERIOD_45  4630  // мкс
-#define LUT_SIZE          288   // Количество позиций за оборот
+#define LUT_SIZE          287   // Количество позиций за оборот
 #define MIN_CALIB_REVS    10    // Минимальное число оборотов для калибровки
 
 static pid_mode_t current_mode = PID_MODE_OFF;
@@ -146,7 +146,13 @@ void lut_calculate_and_save(void)
     
     for (int i = 0; i < LUT_SIZE; i++) {
         int32_t avg_period = lut_sum[i] / lut_rev_count;
-        lut_correction[i] = (int16_t)(avg_period - target_period);
+        if (i == 0) {
+            // Нулевой индекс: сырой период ~12500, нужно вычесть 2×target
+            lut_correction[i] = (int16_t)(avg_period - 2 * target_period);
+        } else {
+            // Обычные индексы: сырой период ~6250, вычитаем target
+            lut_correction[i] = (int16_t)(avg_period - target_period);
+        }
     }
 
     nvs_handle_t nvs;
@@ -184,10 +190,10 @@ void pid_task(void *pvParameters)
             // =========================================================
             if (pulse_data.is_zero_mark) {
                 // Проверяем валидность ЗАВЕРШЕННОГО оборота
-                bool last_revolution_valid = (pulses_since_zero == 287);
+                bool last_revolution_valid = (pulses_since_zero == 286);
                 
                 if (!last_revolution_valid) {
-                    ESP_LOGW(TAG, "Invalid revolution detected! Pulses: %d (expected 287). Discarded.", pulses_since_zero);
+                    ESP_LOGW(TAG, "Invalid revolution detected! Pulses: %d (expected 286). Discarded.", pulses_since_zero);
                 } else {
                     // Оборот валиден - копируем временный буфер в основной накопитель
                     if (current_mode == PID_MODE_LUT_CALIBRATION) {
