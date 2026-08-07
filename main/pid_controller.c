@@ -5,17 +5,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include <string.h>
 
 static const char *TAG = "PID";
 
-#define TARGET_PERIOD_33  6250  // мкс для 33.333 RPM (288 импульсов)
-#define TARGET_PERIOD_45  4630  // мкс для 45 RPM (288 импульсов)
+#define TARGET_PERIOD_33  6250  // мкс
+#define TARGET_PERIOD_45  4630  // мкс
+#define LUT_SIZE          288   // Количество позиций за оборот
+#define MIN_CALIB_REVS    10    // Минимальное число оборотов для калибровки
 
 static pid_mode_t current_mode = PID_MODE_OFF;
 static uint32_t target_period = TARGET_PERIOD_33;
 static bool pid_running = false;
 
-// PID параметры
 static float Kp = 0.0f;
 static float Ki = 0.006f;
 static int32_t integral_term = 0;
@@ -27,10 +31,20 @@ static uint16_t dac_value = 2048;
 
 extern QueueHandle_t xPulseQueue;
 
+// === Переменные для LUT ===
+static int16_t lut_correction[LUT_SIZE] = {0};           // Итоговая таблица поправок
+static int32_t lut_sum[LUT_SIZE] = {0};                  // Основной накопитель (только валидные обороты)
+static int32_t temp_lut_sum[LUT_SIZE] = {0};             // Временный буфер текущего оборота
+static uint16_t lut_rev_count = 0;                       // Счетчик валидных оборотов
+
+static uint16_t current_pulse_index = 0;                 // Текущий индекс импульса (0..287)
+static uint16_t pulses_since_zero = 0;                   // Счетчик импульсов с последней нулевой метки
+
 void pid_init(void)
 {
     ESP_LOGI(TAG, "PID controller initialized");
     dac_set_value(2048);
+    nvs_flash_init();
 }
 
 void pid_start(void)
@@ -56,20 +70,17 @@ bool pid_is_running(void)
 void pid_set_mode(pid_mode_t mode)
 {
     current_mode = mode;
-    const char* mode_str[] = {"OFF", "ON", "LUT_CALIBRATION"};
+    const char* mode_str[] = {"OFF", "ON", "LUT_CALIBRATION", "LUT_ACTIVE"};
     ESP_LOGI(TAG, "PID mode set to: %s", mode_str[mode]);
-    switch (current_mode) {
-        case PID_MODE_OFF:
-            pid_stop();
-            break;
-        case PID_MODE_ON:
-            pid_start();
-            break;
-        case PID_MODE_LUT_CALIBRATION:
-            pid_stop();
-            break;
+    
+    if (mode == PID_MODE_OFF) {
+        pid_stop();
+    } else if (mode == PID_MODE_ON || mode == PID_MODE_LUT_ACTIVE) {
+        pid_start();
+    } else if (mode == PID_MODE_LUT_CALIBRATION) {
+        pid_start();
+        lut_clear_ram();
     }
-
 }
 
 void pid_set_target_speed(uint8_t speed)
@@ -82,6 +93,79 @@ void pid_set_target_speed(uint8_t speed)
     ESP_LOGI(TAG, "Target speed: %d RPM (period: %lu us)", speed, target_period);
 }
 
+void pid_set_ki(float ki)
+{
+    Ki = ki;
+    ESP_LOGI(TAG, "Ki changed to: %.6f", ki);
+}
+
+float pid_get_ki(void)
+{
+    return Ki;
+}
+
+// === Функции управления LUT ===
+
+void lut_clear_ram(void)
+{
+    memset(lut_sum, 0, sizeof(lut_sum));
+    memset(temp_lut_sum, 0, sizeof(temp_lut_sum));
+    memset(lut_correction, 0, sizeof(lut_correction));
+    lut_rev_count = 0;
+    current_pulse_index = 0;
+    pulses_since_zero = 0;
+    ESP_LOGI(TAG, "LUT RAM cleared");
+}
+
+void lut_load_from_nvs(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("ttable_lut", NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        size_t required_size = sizeof(lut_correction);
+        err = nvs_get_blob(nvs, "lut_corr", lut_correction, &required_size);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "LUT loaded from NVS successfully (%d bytes)", required_size);
+        } else {
+            ESP_LOGW(TAG, "No LUT data found in NVS");
+        }
+        nvs_close(nvs);
+    } else {
+        ESP_LOGW(TAG, "Failed to open NVS namespace: %s", esp_err_to_name(err));
+    }
+}
+
+void lut_calculate_and_save(void)
+{
+    if (lut_rev_count < MIN_CALIB_REVS) {
+        ESP_LOGW(TAG, "Not enough VALID revolutions for calibration: %d (min %d)", lut_rev_count, MIN_CALIB_REVS);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Calculating LUT from %d valid revolutions...", lut_rev_count);
+    
+    for (int i = 0; i < LUT_SIZE; i++) {
+        int32_t avg_period = lut_sum[i] / lut_rev_count;
+        lut_correction[i] = (int16_t)(avg_period - target_period);
+    }
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open("ttable_lut", NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(nvs, "lut_corr", lut_correction, sizeof(lut_correction));
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "LUT calculated and saved to NVS successfully!");
+            }
+        }
+        nvs_close(nvs);
+    }
+
+    memset(lut_sum, 0, sizeof(lut_sum));
+    lut_rev_count = 0;
+}
+
 void pid_task(void *pvParameters)
 {
     pulse_data_t pulse_data;
@@ -90,36 +174,78 @@ void pid_task(void *pvParameters)
     float filtered_period = 6250.0f;
     const float FILTER_ALPHA = 0.3f;
     
-    ESP_LOGI(TAG, "PID task started with even-count averaging");
+    ESP_LOGI(TAG, "PID task started with corrected LUT logic");
     
     while (1) {
         if (xQueueReceive(xPulseQueue, &pulse_data, pdMS_TO_TICKS(100)) == pdTRUE) {
             
-            // Накапливаем период
-            period_sum += pulse_data.period_us;
-            
-            // Обновляем счетчик
+            // =========================================================
+            // 1. Обработка нулевой метки - ПРОВЕРКА ЗАВЕРШЕННОГО ОБОРОТА
+            // =========================================================
             if (pulse_data.is_zero_mark) {
-                pulse_count = 2;  // Нулевой импульс сразу дает 2
+                // Проверяем валидность ЗАВЕРШЕННОГО оборота
+                bool last_revolution_valid = (pulses_since_zero == 287);
+                
+                if (!last_revolution_valid) {
+                    ESP_LOGW(TAG, "Invalid revolution detected! Pulses: %d (expected 287). Discarded.", pulses_since_zero);
+                } else {
+                    // Оборот валиден - копируем временный буфер в основной накопитель
+                    if (current_mode == PID_MODE_LUT_CALIBRATION) {
+                        for (int i = 0; i < LUT_SIZE; i++) {
+                            lut_sum[i] += temp_lut_sum[i];
+                        }
+                        lut_rev_count++;
+                        
+                        if (lut_rev_count % 10 == 0) {
+                            ESP_LOGI(TAG, "LUT calibration: %d valid revolutions accumulated", lut_rev_count);
+                        }
+                    }
+                }
+                
+                // Сбрасываем счетчики для нового оборота
+                pulses_since_zero = 0;
+                current_pulse_index = 0;
+                memset(temp_lut_sum, 0, sizeof(temp_lut_sum));
+                
             } else {
-                pulse_count += 1; // Обычный импульс добавляет 1
+                current_pulse_index = (current_pulse_index + 1) % LUT_SIZE;
+                pulses_since_zero++;
+            }
+
+            // =========================================================
+            // 2. Накопление данных во ВРЕМЕННЫЙ буфер (всегда, без проверки флага)
+            // =========================================================
+            if (current_mode == PID_MODE_LUT_CALIBRATION) {
+                temp_lut_sum[current_pulse_index] += pulse_data.period_us;
+            }
+
+            // =========================================================
+            // 3. ПРИМЕНЕНИЕ LUT ДО УСРЕДНЕНИЯ
+            // =========================================================
+            int32_t corrected_period = pulse_data.period_us;
+            if (current_mode == PID_MODE_LUT_ACTIVE) {
+                corrected_period = pulse_data.period_us - lut_correction[current_pulse_index];
+            }
+
+            // =========================================================
+            // 4. Усреднение по 2 импульса и расчет ПИД
+            // =========================================================
+            period_sum += corrected_period;
+            
+            if (pulse_data.is_zero_mark) {
+                pulse_count = 2;
+            } else {
+                pulse_count += 1;
             }
             
-            // Передача и расчет происходят строго когда накоплено 2 "нормальных" импульса
             if (pulse_count == 2) {
-                // Вычисляем средний период
                 uint32_t avg_period = period_sum / 2;
-                
-                // Сбрасываем накопитель для следующего цикла
                 period_sum = 0;
                 pulse_count = 0;
                 
-                // Применяем экспоненциальное сглаживание
-                filtered_period = FILTER_ALPHA * avg_period + 
-                                 (1.0f - FILTER_ALPHA) * filtered_period;
+                filtered_period = FILTER_ALPHA * avg_period + (1.0f - FILTER_ALPHA) * filtered_period;
                 
-                // Рассчитываем PID
-                if (pid_running && current_mode != PID_MODE_OFF) {
+                if (pid_running && current_mode != PID_MODE_OFF && current_mode != PID_MODE_LUT_CALIBRATION) {
                     int32_t error = (int32_t)target_period - (int32_t)filtered_period;
                     
                     integral_term -= (int32_t)(error * Ki * 1000);
@@ -137,34 +263,16 @@ void pid_task(void *pvParameters)
                     
                     static uint32_t counter = 0;
                     if (counter++ % 100 == 0) {
-                        ESP_LOGI(TAG, "Avg: %lu, Filtered: %.1f, Error: %ld, DAC: %u",
-                                 avg_period, filtered_period, error, dac_value);
+                        ESP_LOGI(TAG, "Idx: %3d, Raw: %lu, Corr: %ld, Avg: %lu, Err: %ld, DAC: %u",
+                                 current_pulse_index, 
+                                 pulse_data.period_us, 
+                                 (long)lut_correction[current_pulse_index], 
+                                 avg_period, 
+                                 error, 
+                                 dac_value);
                     }
                 }
             }
         }
     }
-}
-
-void lut_calibration_task(void *pvParameters)
-{
-    ESP_LOGI(TAG, "LUT calibration task started");
-    
-    // Здесь будет реализация калибровки LUT
-    // Сбор данных за несколько оборотов и вычисление таблицы коррекции
-    
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-}
-
-void pid_set_ki(float ki)
-{
-    Ki = ki;
-    ESP_LOGI(TAG, "Ki changed to: %.6f", ki);
-}
-
-float pid_get_ki(void)
-{
-    return Ki;
 }

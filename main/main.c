@@ -93,15 +93,15 @@ void app_main(void)
         1
     );
     
-    xTaskCreatePinnedToCore(
-        lut_calibration_task,
-        "lut_cal",
-        4096,
-        NULL,
-        8,
-        NULL,
-        1
-    );
+    //xTaskCreatePinnedToCore(
+    //    lut_calibration_task,
+    //    "lut_cal",
+    //    4096,
+    //    NULL,
+    //    8,
+    //    NULL,
+    //    1
+    //);
     
     ESP_LOGI(TAG, "System started");
     

@@ -27,6 +27,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             esp_mqtt_client_subscribe(client, "turntable/pid_mode", 1);
             esp_mqtt_client_subscribe(client, "turntable/pid_ki", 1);
             esp_mqtt_client_subscribe(client, "turntable/set_dac", 1);
+            esp_mqtt_client_subscribe(client, "turntable/lut_cmd", 1);
             break;
             
         case MQTT_EVENT_DISCONNECTED:
@@ -70,6 +71,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                 memcpy(data_buf, event->data, event->data_len < 31 ? event->data_len : 31);
                 uint16_t set_dac = atoi(data_buf);
                 dac_set_value(set_dac);
+            } else if (strncmp(event->topic, "turntable/lut_cmd", event->topic_len) == 0) {
+                if (strncmp(event->data, "CLEAR", event->data_len) == 0) {
+                    lut_clear_ram();
+                } 
+                else if (strncmp(event->data, "LOAD", event->data_len) == 0) {
+                    lut_load_from_nvs();
+                } 
+                else if (strncmp(event->data, "SAVE", event->data_len) == 0) {
+                    lut_calculate_and_save();
+                }
             }
             break;
             

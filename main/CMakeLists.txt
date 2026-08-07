@@ -1,8 +1,8 @@
-idf_component_register(SRCS "main.c" 
+idf_component_register(SRCS "pid_controller.c" "main.c" 
                               "wifi_sta.c" 
                               "mqtt_tools.c"
                               "fsm.c" 
-                              "pid_controller.c" 
+                              
                               "lut_calibration.c"
                               "dac_control.c" 
                               "mcpwm_capture.c" 
