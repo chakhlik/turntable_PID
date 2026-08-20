@@ -30,6 +30,8 @@ static uint16_t dac_value = 2048;
 #define DAC_MAX         3072
 
 extern QueueHandle_t xPulseQueue;
+// Глобальная очередь для телеметрии
+QueueHandle_t xTelemetryQueue = NULL;
 
 // === Переменные для LUT ===
 static int16_t lut_correction[LUT_SIZE] = {0};           // Итоговая таблица поправок
@@ -45,6 +47,9 @@ void pid_init(void)
     ESP_LOGI(TAG, "PID controller initialized");
     dac_set_value(2048);
     nvs_flash_init();
+
+    // Создаем очередь для телеметрии (глубина 64, достаточно для сглаживания пиков Wi-Fi)
+    xTelemetryQueue = xQueueCreate(64, sizeof(telemetry_data_t));
 }
 
 void pid_start(void)
@@ -178,9 +183,11 @@ void pid_task(void *pvParameters)
     uint32_t period_sum = 0;
     uint8_t pulse_count = 0;
     float filtered_period = 6250.0f;
-    const float FILTER_ALPHA = 0.3f;
+    const float FILTER_ALPHA = 0.7f;
     
     ESP_LOGI(TAG, "PID task started with corrected LUT logic");
+
+    uint32_t packet_num = 0;
     
     while (1) {
         if (xQueueReceive(xPulseQueue, &pulse_data, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -250,6 +257,18 @@ void pid_task(void *pvParameters)
                 pulse_count = 0;
                 
                 filtered_period = FILTER_ALPHA * avg_period + (1.0f - FILTER_ALPHA) * filtered_period;
+
+                // === ОТПРАВКА В ОЧЕРЕДЬ ТЕЛЕМЕТРИИ ===
+                telemetry_data_t t_data;
+                t_data.packet_num = packet_num++;
+                t_data.period = avg_period;
+                t_data.pulse_index = current_pulse_index;
+                t_data.is_zero_mark = pulse_data.is_zero_mark ? 1 : 0;
+                
+                // xQueueSend с timeout=0: если очередь переполнена, пакет просто отбрасывается,
+                // что предотвращает блокировку задачи PID. Для телеметрии это допустимо.
+                xQueueSend(xTelemetryQueue, &t_data, 0);
+                // ======================================
                 
                 if (pid_running && current_mode != PID_MODE_OFF && current_mode != PID_MODE_LUT_CALIBRATION) {
                     int32_t error = (int32_t)target_period - (int32_t)filtered_period;

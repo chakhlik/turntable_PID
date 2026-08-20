@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 typedef enum {
     PID_MODE_OFF,
@@ -26,3 +28,14 @@ float pid_get_ki(void);
 void lut_clear_ram(void);
 void lut_load_from_nvs(void);
 void lut_calculate_and_save(void);
+
+// Структура данных для телеметрии (после усреднения)
+typedef struct {
+    uint32_t packet_num;
+    uint32_t period;
+    uint16_t pulse_index;
+    uint8_t  is_zero_mark;
+} telemetry_data_t;
+
+// Очередь для передачи данных в задачу UDP
+extern QueueHandle_t xTelemetryQueue;

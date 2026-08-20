@@ -5,7 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
-extern QueueHandle_t xUdpQueue; // Объявлена в udp_telemetry.c
+//extern QueueHandle_t xUdpQueue; // Объявлена в udp_telemetry.c
 static const char *TAG = "CAPTURE";
 
 // Очередь для передачи данных из ISR в задачу UDP
@@ -54,10 +54,12 @@ static void IRAM_ATTR gpio_isr_handler(void* arg)
     
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xQueueSendFromISR(xPulseQueue, &data, &xHigherPriorityTaskWoken);
+    
+    // !!! Изменен порядок телеметрии!!!!
     // Отправляем копию данных в очередь для UDP телеметрии
-    if (xUdpQueue != NULL) {
-        xQueueSendFromISR(xUdpQueue, &data, &xHigherPriorityTaskWoken);
-    }
+    //if (xUdpQueue != NULL) {
+    //    xQueueSendFromISR(xUdpQueue, &data, &xHigherPriorityTaskWoken);
+    //}
     
     if (xHigherPriorityTaskWoken) {
         portYIELD_FROM_ISR();

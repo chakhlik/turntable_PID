@@ -58,6 +58,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                     pid_set_mode(PID_MODE_OFF);
                 } else if (strncmp(event->data, "LUT", event->data_len) == 0) {
                     pid_set_mode(PID_MODE_LUT_CALIBRATION);
+                } else if (strncmp(event->data, "ON_A", event->data_len) == 0) {
+                    pid_set_mode(PID_MODE_LUT_ACTIVE);
                 }
             } else if (strncmp(event->topic, "turntable/pid_ki", event->topic_len) == 0) {
                 // Парсим значение Ki из данных
