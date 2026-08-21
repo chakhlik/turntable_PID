@@ -1,14 +1,16 @@
 #pragma once
-#include "driver/gpio.h"
+
 #include <stdint.h>
 #include <stdbool.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
-// Структура данных для одного измерения
-// Вынесена в заголовочный файл, так как используется и в mcpwm_capture.c, и в udp_telemetry.c
 typedef struct {
-    uint32_t period_us;      // Измеренный период в микросекундах
-    uint16_t  pulse_index;    // Индекс импульса (0..287)
-    bool     is_zero_mark;   // Флаг: это был широкий зазор (нулевая метка)
+    uint32_t period_ticks;  // Период в тиках 80 МГц (1 тик = 12.5 нс)
+    uint16_t pulse_index;
+    bool is_zero_mark;
 } pulse_data_t;
 
-void mcpwm_capture_init(gpio_num_t gpio_num);
+extern QueueHandle_t xPulseQueue;
+
+void gptimer_capture_init(int gpio_num);

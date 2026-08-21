@@ -5,6 +5,7 @@
 #include "esp_system.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "driver/gpio.h"
 
 #include "wifi_sta.h"
 #include "mqtt_tools.h"
@@ -54,7 +55,9 @@ void app_main(void)
     pid_init();
     
     // 5. Capture
-    mcpwm_capture_init(GPIO_NUM_19);
+    // Было: mcpwm_capture_init(GPIO_NUM_19);
+    // Стало:
+    gptimer_capture_init(GPIO_NUM_19);
     
     // 6. FSM
     fsm_init();
