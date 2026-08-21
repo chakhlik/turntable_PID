@@ -73,7 +73,7 @@ void app_main(void)
         NULL,
         5,
         NULL,
-        0
+        0       // Core 0
     );
     
     xTaskCreatePinnedToCore(
@@ -83,7 +83,7 @@ void app_main(void)
         NULL,
         15,
         NULL,
-        0
+        1       // Core 1
     );
     
     xTaskCreatePinnedToCore(
@@ -93,7 +93,7 @@ void app_main(void)
         NULL,
         10,
         NULL,
-        1
+        0       // Core 0
     );
     
     //xTaskCreatePinnedToCore(

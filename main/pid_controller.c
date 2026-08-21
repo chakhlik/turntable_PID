@@ -19,7 +19,7 @@ static const char *TAG = "PID";
 // Порог нулевой метки: 10000 мкс × 80 = 800000 тиков
 #define ZERO_MARK_THRESHOLD_TICKS  800000
 
-#define LUT_SIZE          288
+#define LUT_SIZE          287
 #define MIN_CALIB_REVS    10
 
 static pid_mode_t current_mode = PID_MODE_OFF;
@@ -27,14 +27,14 @@ static uint32_t target_period_ticks = TARGET_PERIOD_33_TICKS;
 static bool pid_running = false;
 
 static float Kp = 0.0f;
-static float Ki = 0.006f;
+static float Ki = 6.0f;  //   *1000
 static int32_t integral_term = 0;
 static uint16_t dac_value = 2048;
 
 // Пределы интегратора в тиках (было 100000 мкс, теперь × 80)
 #define INTEGRAL_LIMIT_TICKS  8000000
-#define DAC_MIN         1024
-#define DAC_MAX         3072
+#define DAC_MIN         2
+#define DAC_MAX         4094
 
 extern QueueHandle_t xPulseQueue;
 QueueHandle_t xTelemetryQueue = NULL;
@@ -146,6 +146,27 @@ void lut_load_from_nvs(void)
     }
 }
 
+// Функция низкочастотной фильтрации в пространственной области
+// Использует скользящее среднее с циклическим буфером
+static void spatial_lowpass_filter(int32_t* input, int32_t* output, int size, int window_size)
+{
+    int half_window = window_size / 2;
+    
+    for (int i = 0; i < size; i++) {
+        int32_t sum = 0;
+        int count = 0;
+        
+        // Циклическое окно вокруг точки i
+        for (int j = -half_window; j <= half_window; j++) {
+            int idx = (i + j + size) % size;  // Циклический индекс
+            sum += input[idx];
+            count++;
+        }
+        
+        output[i] = sum / count;
+    }
+}
+
 void lut_calculate_and_save(void)
 {
     if (lut_rev_count < MIN_CALIB_REVS) {
@@ -155,17 +176,32 @@ void lut_calculate_and_save(void)
 
     ESP_LOGI(TAG, "Calculating LUT from %d revolutions...", lut_rev_count);
     
+    // 1. Вычисляем среднюю ошибку для каждого индекса
+    int32_t e_avg[LUT_SIZE];
     for (int i = 0; i < LUT_SIZE; i++) {
         int32_t avg_period_ticks = lut_sum[i] / lut_rev_count;
         
         // Для нулевого индекса вычитаем 2×target (т.к. нулевая метка = 2 импульса)
         if (i == 0) {
-            lut_correction[i] = (int16_t)(avg_period_ticks - 2 * target_period_ticks);
+            e_avg[i] = (int32_t)(avg_period_ticks - 2 * target_period_ticks);
         } else {
-            lut_correction[i] = (int16_t)(avg_period_ticks - target_period_ticks);
+            e_avg[i] = (int32_t)(avg_period_ticks - target_period_ticks);
         }
     }
 
+    // 2. Применяем пространственный ФНЧ к ошибке
+    //    Получаем механическую составляющую ошибки
+    int32_t e_mech[LUT_SIZE];
+    spatial_lowpass_filter(e_avg, e_mech, LUT_SIZE, 30);
+
+    // 3. Вычисляем поправку: только ошибка датчика
+    //    LUT[i] = полная ошибка - механическая ошибка
+    for (int i = 0; i < LUT_SIZE; i++) {
+        int32_t sensor_error = e_avg[i] - e_mech[i];
+        lut_correction[i] = (int16_t)sensor_error;
+    }
+
+    // Сохранение в NVS
     nvs_handle_t nvs;
     esp_err_t err = nvs_open("ttable_lut", NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
@@ -199,7 +235,7 @@ void pid_task(void *pvParameters)
             
             // 1. Обработка нулевой метки
             if (pulse_data.is_zero_mark) {
-                bool last_revolution_valid = (pulses_since_zero == 287);
+                bool last_revolution_valid = (pulses_since_zero == 286);
                 
                 if (!last_revolution_valid) {
                     ESP_LOGW(TAG, "Invalid revolution! Pulses: %d", pulses_since_zero);
@@ -266,7 +302,7 @@ void pid_task(void *pvParameters)
                 if (pid_running && current_mode != PID_MODE_OFF && current_mode != PID_MODE_LUT_CALIBRATION) {
                     int32_t error_ticks = (int32_t)target_period_ticks - (int32_t)filtered_period_ticks;
                     
-                    integral_term -= (int32_t)(error_ticks * Ki * 1000);
+                    integral_term -= (int32_t)(error_ticks * Ki);  //  *1000 учтено в значении коэффициента Ki
                     
                     if (integral_term > INTEGRAL_LIMIT_TICKS) integral_term = INTEGRAL_LIMIT_TICKS;
                     else if (integral_term < -INTEGRAL_LIMIT_TICKS) integral_term = -INTEGRAL_LIMIT_TICKS;
