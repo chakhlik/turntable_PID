@@ -10,8 +10,8 @@ static gptimer_handle_t gptimer = NULL;
 static uint64_t last_capture_ticks = 0;
 QueueHandle_t xPulseQueue = NULL;
 
-// Порог для определения нулевой метки в тиках (10000 мкс * 80 тиков/мкс = 800 000 тиков)
-#define ZERO_MARK_THRESHOLD_TICKS 800000 
+// Порог для определения нулевой метки в тиках (10000 мкс * 40 тиков/мкс = 800 000 тиков)
+#define ZERO_MARK_THRESHOLD_TICKS 400000 
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
@@ -48,11 +48,11 @@ void gptimer_capture_init(int gpio_num)
 
     xPulseQueue = xQueueCreate(32, sizeof(pulse_data_t));
 
-    // Настраиваем 64-битный таймер с частотой 80 МГц (1 тик = 12.5 нс)
+    // Настраиваем 64-битный таймер с частотой 40 МГц (1 тик = 25 нс)
     gptimer_config_t timer_config = {
         .clk_src = GPTIMER_CLK_SRC_DEFAULT, // APB 80 МГц
         .direction = GPTIMER_COUNT_UP,
-        .resolution_hz = 80 * 1000 * 1000,  // 80 МГц
+        .resolution_hz = 40 * 1000 * 1000,  // 40 МГц (1 тик = 25 нс)
     };
     ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &gptimer));
 
@@ -74,5 +74,5 @@ void gptimer_capture_init(int gpio_num)
     gpio_install_isr_service(ESP_INTR_FLAG_IRAM | ESP_INTR_FLAG_LEVEL3);
     gpio_isr_handler_add(gpio_num, gpio_isr_handler, NULL);
 
-    ESP_LOGI(TAG, "GPTimer Capture initialized. Resolution: 12.5 ns (80 MHz)");
+    ESP_LOGI(TAG, "GPTimer Capture initialized. Resolution: 25 ns (40 MHz)");
 }

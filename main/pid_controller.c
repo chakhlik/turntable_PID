@@ -1,6 +1,7 @@
 #include "pid_controller.h"
 #include "dac_control.h"
 #include "mcpwm_capture.h"
+#include "led_indicator.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -12,12 +13,12 @@
 static const char *TAG = "PID";
 
 // === КОНСТАНТЫ В ТИКАХ (1 тик = 12.5 нс при 80 МГц) ===
-#define TICKS_PER_US        80
-#define TARGET_PERIOD_33_TICKS  (6250 * TICKS_PER_US)   // 500000 тиков
-#define TARGET_PERIOD_45_TICKS  (4630 * TICKS_PER_US)   // 370400 тиков
+#define TICKS_PER_US        40
+#define TARGET_PERIOD_33_TICKS  (6250 * TICKS_PER_US)   // 250000 тиков
+#define TARGET_PERIOD_45_TICKS  (4630 * TICKS_PER_US)   // 185200 тиков
 
 // Порог нулевой метки: 10000 мкс × 80 = 800000 тиков
-#define ZERO_MARK_THRESHOLD_TICKS  800000
+#define ZERO_MARK_THRESHOLD_TICKS  (10000 * TICKS_PER_US)  // 400000 тиков
 
 #define LUT_SIZE          287
 #define MIN_CALIB_REVS    10
@@ -32,7 +33,7 @@ static int32_t integral_term = 0;
 static uint16_t dac_value = 2048;
 
 // Пределы интегратора в тиках (было 100000 мкс, теперь × 80)
-#define INTEGRAL_LIMIT_TICKS  8000000
+#define INTEGRAL_LIMIT_TICKS  (100000 * TICKS_PER_US)  // 4000000 тиков
 #define DAC_MIN         2
 #define DAC_MAX         4094
 
@@ -235,6 +236,13 @@ void pid_task(void *pvParameters)
             
             // 1. Обработка нулевой метки
             if (pulse_data.is_zero_mark) {
+
+                if (current_mode == PID_MODE_ON) {
+                    led_blink_once();
+                } else if (current_mode == PID_MODE_LUT_ACTIVE) {
+                    led_blink_twice();
+                }
+
                 bool last_revolution_valid = (pulses_since_zero == 286);
                 
                 if (!last_revolution_valid) {
@@ -320,7 +328,7 @@ void pid_task(void *pvParameters)
                         ESP_LOGI(TAG, "Idx: %3d, Raw: %lu ticks (%.0f us), Corr: %ld ticks, Avg: %lu ticks, Err: %ld ticks, DAC: %u",
                                  current_pulse_index, 
                                  pulse_data.period_ticks,
-                                 pulse_data.period_ticks / 80.0f,
+                                 pulse_data.period_ticks / 40.0f,
                                  (long)lut_correction[current_pulse_index], 
                                  avg_period_ticks, 
                                  error_ticks, 

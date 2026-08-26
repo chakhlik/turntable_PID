@@ -14,12 +14,17 @@
 #include "dac_control.h"
 #include "mcpwm_capture.h"
 #include "udp_telemetry.h"
+#include "led_indicator.h"
 
 static const char *TAG = "MAIN";
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "=== Turntable PID - FSM + LUT ===");
+
+    led_init();
+    led_task_start();
+    led_blink_fast();
     
     // 1. Инициализация NVS
     esp_err_t ret = nvs_flash_init();
@@ -107,6 +112,7 @@ void app_main(void)
     //);
     
     ESP_LOGI(TAG, "System started");
+    led_off();
     
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));

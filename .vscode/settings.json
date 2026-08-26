@@ -16,6 +16,6 @@
     "--compile-commands-dir=${workspaceFolder}\\build"
   ],
   "idf.currentSetup": "c:\\DevTools\\Espressif\\frameworks\\esp-idf-v5.5.1",
-  "idf.portWin": "COM5",
+  "idf.portWin": "COM9",
   "idf.flashType": "DFU"
 }
