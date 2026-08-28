@@ -20,7 +20,7 @@ typedef enum {
     TLM_TYPE_INTEGRAL_TERM
 } tlm_type_t;
 
-extern tlm_type_t current_tlm = TLM_TYPE_AVERAGED;
+extern tlm_type_t current_tlm;
 
 void pid_init(void);
 void pid_task(void *pvParameters);

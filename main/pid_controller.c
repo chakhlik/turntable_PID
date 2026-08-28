@@ -24,6 +24,7 @@ static const char *TAG = "PID";
 #define MIN_CALIB_REVS    10
 
 static pid_mode_t current_mode = PID_MODE_OFF;
+tlm_type_t current_tlm = TLM_TYPE_AVERAGED;
 static uint32_t target_period_ticks = TARGET_PERIOD_33_TICKS;
 static bool pid_running = false;
 
@@ -310,7 +311,7 @@ void pid_task(void *pvParameters)
                     if (integral_term > INTEGRAL_LIMIT_TICKS) integral_term = INTEGRAL_LIMIT_TICKS;
                     else if (integral_term < -INTEGRAL_LIMIT_TICKS) integral_term = -INTEGRAL_LIMIT_TICKS;
                     
-                    int32_t pid_output = 2048 + (integral_term / 40000);
+                    int32_t pid_output = 2048 - (int32_t)(Kp * error_ticks) + (integral_term / 40000);
                     
                     if (pid_output < DAC_MIN) pid_output = DAC_MIN;
                     else if (pid_output > DAC_MAX) pid_output = DAC_MAX;

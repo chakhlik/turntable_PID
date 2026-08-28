@@ -95,7 +95,7 @@ static void led_task(void *pvParameters)
             
             // Вычисляем время включения и выключения
             uint32_t on_time_ms = (period * duty) / 100;
-            uint32_t off_time_ms = period - on_time_ms;
+            //uint32_t off_time_ms = period - on_time_ms;
             
             if (current < count || count == 0) {
                 // Еще нужно мигать

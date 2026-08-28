@@ -58,9 +58,9 @@ void udp_telemetry_task(void *pvParameters)
             int err = sendto(sock, udp_buf, len, 0, 
                            (struct sockaddr *)&dest_addr, sizeof(dest_addr));
             // закоментировано для экономии ресурсов
-            //if (err < 0) {
+            if (err < 0) {
             //    ESP_LOGE(TAG, "Send failed: errno %d", errno);
-            //}
+            }
         }
     }
     
