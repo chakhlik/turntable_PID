@@ -28,6 +28,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             esp_mqtt_client_subscribe(client, "turntable/pid_ki", 1);
             esp_mqtt_client_subscribe(client, "turntable/set_dac", 1);
             esp_mqtt_client_subscribe(client, "turntable/lut_cmd", 1);
+            esp_mqtt_client_subscribe(client, "turntable/tlm_type", 1);
             break;
             
         case MQTT_EVENT_DISCONNECTED:
@@ -60,6 +61,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                     pid_set_mode(PID_MODE_LUT_CALIBRATION);
                 } else if (strncmp(event->data, "ON_A", event->data_len) == 0) {
                     pid_set_mode(PID_MODE_LUT_ACTIVE);
+                }
+            } else if (strncmp(event->topic, "turntable/tlm_type", event->topic_len) == 0) {
+                if (strncmp(event->data, "RAW", event->data_len) == 0) {
+                    current_tlm = TLM_TYPE_RAW;
+                } else if (strncmp(event->data, "LUT", event->data_len) == 0) {
+                    current_tlm = TLM_TYPE_LUT_CLEARED;
+                } else if (strncmp(event->data, "AVER", event->data_len) == 0) {
+                    current_tlm = TLM_TYPE_AVERAGED;
+                } else if (strncmp(event->data, "FILT", event->data_len) == 0) {
+                    current_tlm = TLM_TYPE_FILTERED;
+                } else if (strncmp(event->data, "INTEG", event->data_len) == 0) {
+                    current_tlm = TLM_TYPE_INTEGRAL_TERM;
                 }
             } else if (strncmp(event->topic, "turntable/pid_ki", event->topic_len) == 0) {
                 // Парсим значение Ki из данных

@@ -32,7 +32,7 @@ static float Ki = 6.0f;  //   *1000
 static int32_t integral_term = 0;
 static uint16_t dac_value = 2048;
 
-// Пределы интегратора в тиках (было 100000 мкс, теперь × 80)
+// Пределы интегратора в тиках (было 100000 мкс, теперь × 40)
 #define INTEGRAL_LIMIT_TICKS  (100000 * TICKS_PER_US)  // 4000000 тиков
 #define DAC_MIN         2
 #define DAC_MAX         4094
@@ -256,6 +256,7 @@ void pid_task(void *pvParameters)
                         
                         if (lut_rev_count % 10 == 0) {
                             ESP_LOGI(TAG, "LUT: %d valid revolutions", lut_rev_count);
+                            led_set_blink(200, 50, 5);
                         }
                     }
                 }
@@ -298,13 +299,7 @@ void pid_task(void *pvParameters)
                 filtered_period_ticks = FILTER_ALPHA * avg_period_ticks + 
                                        (1.0f - FILTER_ALPHA) * filtered_period_ticks;
                 
-                // Телеметрия (отправляем тики, plotter переведет в мкс)
-                telemetry_data_t t_data;
-                t_data.packet_num = packet_num++;
-                t_data.period = avg_period_ticks;  // В тиках!
-                t_data.pulse_index = current_pulse_index;
-                t_data.is_zero_mark = pulse_data.is_zero_mark ? 1 : 0;
-                xQueueSend(xTelemetryQueue, &t_data, 0);
+                
                 
                 // Расчет ПИД
                 if (pid_running && current_mode != PID_MODE_OFF && current_mode != PID_MODE_LUT_CALIBRATION) {
@@ -315,7 +310,7 @@ void pid_task(void *pvParameters)
                     if (integral_term > INTEGRAL_LIMIT_TICKS) integral_term = INTEGRAL_LIMIT_TICKS;
                     else if (integral_term < -INTEGRAL_LIMIT_TICKS) integral_term = -INTEGRAL_LIMIT_TICKS;
                     
-                    int32_t pid_output = 2048 + (integral_term / 1000);
+                    int32_t pid_output = 2048 + (integral_term / 40000);
                     
                     if (pid_output < DAC_MIN) pid_output = DAC_MIN;
                     else if (pid_output > DAC_MAX) pid_output = DAC_MAX;
@@ -335,6 +330,29 @@ void pid_task(void *pvParameters)
                                  dac_value);
                     }
                 }
+
+                // Телеметрия (отправляем тики, plotter переведет в мкс)
+                telemetry_data_t t_data;
+                t_data.packet_num = packet_num++;
+                t_data.pulse_index = current_pulse_index;
+                t_data.is_zero_mark = pulse_data.is_zero_mark ? 1 : 0;
+
+                // задаем значение для графика телеметрии в тиках!
+                if (current_tlm == TLM_TYPE_RAW) {
+                    t_data.period = pulse_data.period_ticks;
+                } else if (current_tlm == TLM_TYPE_LUT_CLEARED) {
+                    t_data.period = corrected_period_ticks;
+                } else if (current_tlm == TLM_TYPE_AVERAGED) {
+                    t_data.period = avg_period_ticks;
+                } else if (current_tlm == TLM_TYPE_FILTERED) {
+                    t_data.period = filtered_period_ticks;
+                } else if (current_tlm == TLM_TYPE_INTEGRAL_TERM) {
+                    t_data.period = integral_term;
+                }
+                
+
+                xQueueSend(xTelemetryQueue, &t_data, 0);
+
             }
         }
     }

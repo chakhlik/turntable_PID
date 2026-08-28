@@ -12,6 +12,16 @@ typedef enum {
     PID_MODE_LUT_ACTIVE        // Режим работы PID с компенсацией по LUT
 } pid_mode_t;
 
+typedef enum {
+    TLM_TYPE_RAW,
+    TLM_TYPE_LUT_CLEARED,
+    TLM_TYPE_AVERAGED,
+    TLM_TYPE_FILTERED,
+    TLM_TYPE_INTEGRAL_TERM
+} tlm_type_t;
+
+extern tlm_type_t current_tlm = TLM_TYPE_AVERAGED;
+
 void pid_init(void);
 void pid_task(void *pvParameters);
 void pid_start(void);
