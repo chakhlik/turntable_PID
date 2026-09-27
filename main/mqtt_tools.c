@@ -80,6 +80,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                 memcpy(data_buf, event->data, event->data_len < 31 ? event->data_len : 31);
                 float ki = atof(data_buf);
                 pid_set_ki(ki);
+            } else if (strncmp(event->topic, "turntable/pid_kp", event->topic_len) == 0) {
+                // Парсим значение Kp из данных
+                char data_buf[32] = {0};
+                memcpy(data_buf, event->data, event->data_len < 31 ? event->data_len : 31);
+                float kp = atof(data_buf);
+                pid_set_kp(kp);
+            } else if (strncmp(event->topic, "turntable/pid_kd", event->topic_len) == 0) {
+                // Парсим значение Kd из данных
+                char data_buf[32] = {0};
+                memcpy(data_buf, event->data, event->data_len < 31 ? event->data_len : 31);
+                float kd = atof(data_buf);
+                pid_set_kd(kd);
             } else if (strncmp(event->topic, "turntable/set_dac", event->topic_len) == 0) {
                 // Парсим значение DAC из данных
                 char data_buf[32] = {0};

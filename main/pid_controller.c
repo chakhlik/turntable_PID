@@ -27,14 +27,17 @@ static pid_mode_t current_mode = PID_MODE_OFF;
 tlm_type_t current_tlm = TLM_TYPE_AVERAGED;
 static uint32_t target_period_ticks = TARGET_PERIOD_33_TICKS;
 static bool pid_running = false;
-
+static float previous_filtered_period_ticks = 0.0f;
+static float Kd = 0.0f; 
 static float Kp = 0.0f;
 static float Ki = 6.0f;  //   *1000
+
+
 static int32_t integral_term = 0;
 static uint16_t dac_value = 2048;
 
 // Пределы интегратора в тиках (было 100000 мкс, теперь × 40)
-#define INTEGRAL_LIMIT_TICKS  (100000 * TICKS_PER_US)  // 4000000 тиков
+#define INTEGRAL_LIMIT_TICKS  (2000000 * TICKS_PER_US)  // 4000000 тиков
 #define DAC_MIN         2
 #define DAC_MAX         4094
 
@@ -114,6 +117,18 @@ void pid_set_ki(float ki)
     ESP_LOGI(TAG, "Ki changed to: %.6f", ki);
 }
 
+void pid_set_kp(float kp)
+{
+    Kp = kp;
+    ESP_LOGI(TAG, "Ki changed to: %.6f", kp);
+}
+
+void pid_set_kd(float kd)
+{
+    Kd = kd;
+    ESP_LOGI(TAG, "Ki changed to: %.6f", kd);
+}
+
 float pid_get_ki(void)
 {
     return Ki;
@@ -191,15 +206,15 @@ void lut_calculate_and_save(void)
         }
     }
 
-    // 2. Применяем пространственный ФНЧ к ошибке
-    //    Получаем механическую составляющую ошибки
-    int32_t e_mech[LUT_SIZE];
-    spatial_lowpass_filter(e_avg, e_mech, LUT_SIZE, 30);
+    //// 2. Применяем пространственный ФНЧ к ошибке (временно исключено)
+    ////    Получаем механическую составляющую ошибки
+    //int32_t e_mech[LUT_SIZE];
+    //spatial_lowpass_filter(e_avg, e_mech, LUT_SIZE, 30);
 
     // 3. Вычисляем поправку: только ошибка датчика
     //    LUT[i] = полная ошибка - механическая ошибка
     for (int i = 0; i < LUT_SIZE; i++) {
-        int32_t sensor_error = e_avg[i] - e_mech[i];
+        int32_t sensor_error = e_avg[i]; // - e_mech[i];
         lut_correction[i] = (int16_t)sensor_error;
     }
 
@@ -306,13 +321,29 @@ void pid_task(void *pvParameters)
                 if (pid_running && current_mode != PID_MODE_OFF && current_mode != PID_MODE_LUT_CALIBRATION) {
                     int32_t error_ticks = (int32_t)target_period_ticks - (int32_t)filtered_period_ticks;
                     
-                    integral_term -= (int32_t)(error_ticks * Ki);  //  *1000 учтено в значении коэффициента Ki
+                    // 1. Интегральная составляющая
+                    integral_term += (int32_t)(error_ticks * Ki);  //  *1000 учтено в значении коэффициента Ki
                     
                     if (integral_term > INTEGRAL_LIMIT_TICKS) integral_term = INTEGRAL_LIMIT_TICKS;
                     else if (integral_term < -INTEGRAL_LIMIT_TICKS) integral_term = -INTEGRAL_LIMIT_TICKS;
                     
-                    int32_t pid_output = 2048 - (int32_t)(Kp * error_ticks) + (integral_term / 40000);
+                    // 2. Дифференциальная составляющая (по измерению)
+                    // Если период растет (двигатель замедляется), derivative_ticks > 0
+                    float current_period_f = (float)filtered_period_ticks;
+                    float derivative_ticks = current_period_f - previous_filtered_period_ticks;
+                    previous_filtered_period_ticks = current_period_f;
                     
+                    // 3. Итоговый расчет выхода
+                    // Обратите внимание на знаки:
+                    // - Kp * error: если ошибка > 0 (медленно), уменьшаем DAC (ускоряем)
+                    // + Integral: накапливает поправку
+                    // - Kd * derivative: если двигатель замедляется (derivative > 0), уменьшаем DAC, чтобы предотвратить это
+                    int32_t pid_output = 2048 
+                                       - (int32_t)(Kp * error_ticks) 
+                                       - (integral_term / 40000)
+                                       - (int32_t)(Kd * derivative_ticks);
+                    
+                                       
                     if (pid_output < DAC_MIN) pid_output = DAC_MIN;
                     else if (pid_output > DAC_MAX) pid_output = DAC_MAX;
                     
@@ -348,7 +379,7 @@ void pid_task(void *pvParameters)
                 } else if (current_tlm == TLM_TYPE_FILTERED) {
                     t_data.period = filtered_period_ticks;
                 } else if (current_tlm == TLM_TYPE_INTEGRAL_TERM) {
-                    t_data.period = integral_term;
+                    t_data.period = dac_value;
                 }
                 
 

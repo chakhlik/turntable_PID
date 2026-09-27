@@ -85,35 +85,42 @@ static void led_task(void *pvParameters)
         uint32_t period = blink_period_ms;
         uint8_t duty = blink_duty_percent;
         uint16_t count = blink_pulse_count;
-        uint16_t current = blink_pulse_current;
-        int64_t start_time = blink_start_time_us;
+        
         
         if (period > 0 && duty > 0) {
             // Режим мигания
             int64_t current_time_us = esp_timer_get_time() / 1000;
-            uint32_t elapsed_ms = (uint32_t)(current_time_us - start_time);
+            uint32_t elapsed_ms = (uint32_t)(current_time_us - blink_start_time_us);
             
             // Вычисляем время включения и выключения
             uint32_t on_time_ms = (period * duty) / 100;
             //uint32_t off_time_ms = period - on_time_ms;
             
-            if (current < count || count == 0) {
+            // Проверяем, нужно ли еще мигать (используем глобальную переменную напрямую)
+            if (blink_pulse_current < count || count == 0) {
                 // Еще нужно мигать
                 if (elapsed_ms < on_time_ms) {
-                    // Время включения
+                    // Фаза ВКЛЮЧЕНИЯ
                     if (!led_state) {
                         led_set_level(true);
                     }
                 } else if (elapsed_ms < period) {
-                    // Время выключения
+                    // Фаза ВЫКЛЮЧЕНИЯ внутри текущего цикла
                     if (led_state) {
                         led_set_level(false);
-                        blink_pulse_current = current + 1;
+                        //blink_pulse_current = current + 1;
                     }
                 } else {
-                    // Цикл завершен, начинаем новый
+                    // Полный цикл (ВКЛ+ВЫКЛ) завершен. Переходим к следующему.
                     blink_start_time_us = current_time_us;
-                    blink_pulse_current = current + 1;
+                    blink_pulse_current++;
+
+                    // Сразу включаем светодиод для нового цикла, если он еще нужен
+                    if (blink_pulse_current < count || count == 0) {
+                        led_set_level(true);
+                    } else {
+                        led_set_level(false); // На всякий случай гасим, если это был последний
+                    }
                 }
             } else {
                 // Все импульсы отмигали, выключаем
