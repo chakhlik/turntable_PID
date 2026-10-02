@@ -9,7 +9,8 @@ typedef enum {
     PID_MODE_OFF,
     PID_MODE_ON,               // Обычный PID без LUT
     PID_MODE_LUT_CALIBRATION,  // Режим сбора данных для LUT
-    PID_MODE_LUT_ACTIVE        // Режим работы PID с компенсацией по LUT
+    PID_MODE_LUT_ACTIVE,       // Режим работы PID с компенсацией по LUT
+    PID_MODE_OFF_LUT_ACTIVE    // Режим работы без стабилизации с компенсацией по LUT
 } pid_mode_t;
 
 typedef enum {
@@ -26,6 +27,8 @@ void pid_init(void);
 void pid_task(void *pvParameters);
 void pid_start(void);
 void pid_stop(void);
+void lut_start(void);
+void lut_stop(void);
 bool pid_is_running(void);
 
 void pid_set_mode(pid_mode_t mode);
@@ -44,9 +47,11 @@ void lut_calculate_and_save(void);
 // Структура данных для телеметрии (после усреднения)
 typedef struct {
     uint32_t packet_num;
-    uint32_t period;
+    uint32_t period;        // в тиках
     uint16_t pulse_index;
     uint8_t  is_zero_mark;
+    uint16_t dac_value;     // НОВОЕ: текущее рассчитанное значение DAC
+    uint16_t adc_value;     // НОВОЕ: синхронное измерение напряжения
 } telemetry_data_t;
 
 // Очередь для передачи данных в задачу UDP

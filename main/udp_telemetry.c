@@ -49,11 +49,13 @@ void udp_telemetry_task(void *pvParameters)
     while (1) {
         if (xQueueReceive(xTelemetryQueue, &t_data, pdMS_TO_TICKS(100)) == pdTRUE) {
             char udp_buf[128];
-            int len = snprintf(udp_buf, sizeof(udp_buf), "%lu,%lu,%u,%d\n",
+            int len = snprintf(udp_buf, sizeof(udp_buf), "%lu,%lu,%u,%d,%u,%u\n",
                                (unsigned long)t_data.packet_num,
                                (unsigned long)t_data.period, 
                                t_data.pulse_index,
-                               t_data.is_zero_mark);
+                               t_data.is_zero_mark,
+                               t_data.dac_value,
+                               t_data.adc_value);   
             
             int err = sendto(sock, udp_buf, len, 0, 
                            (struct sockaddr *)&dest_addr, sizeof(dest_addr));

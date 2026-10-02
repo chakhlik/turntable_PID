@@ -8,6 +8,7 @@
 #include "freertos/queue.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "driver/adc.h"
 #include <string.h>
 
 static const char *TAG = "PID";
@@ -27,6 +28,7 @@ static pid_mode_t current_mode = PID_MODE_OFF;
 tlm_type_t current_tlm = TLM_TYPE_AVERAGED;
 static uint32_t target_period_ticks = TARGET_PERIOD_33_TICKS;
 static bool pid_running = false;
+static bool lut_running = false;
 static float previous_filtered_period_ticks = 0.0f;
 static float Kd = 0.0f; 
 static float Kp = 0.0f;
@@ -52,6 +54,7 @@ static uint16_t lut_rev_count = 0;
 
 static uint16_t current_pulse_index = 0;
 static uint16_t pulses_since_zero = 0;
+static uint16_t current_adc = 0;
 
 void pid_init(void)
 {
@@ -62,6 +65,12 @@ void pid_init(void)
     nvs_flash_init();
     
     xTelemetryQueue = xQueueCreate(64, sizeof(telemetry_data_t));
+
+    // === Инициализация ADC1 для синхронного измерения ===
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    // GPIO 34 = ADC1_CHANNEL_6. Attenuation 11dB дает диапазон 0..~3.3В
+    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+    ESP_LOGI(TAG, "ADC1 initialized on GPIO 34");
 }
 
 void pid_start(void)
@@ -79,6 +88,18 @@ void pid_stop(void)
     ESP_LOGI(TAG, "PID stopped");
 }
 
+void lut_start(void)
+{
+    lut_running = true;
+    ESP_LOGI(TAG, "LUT started");
+}
+
+void lut_stop(void)
+{
+    lut_running = false;
+    ESP_LOGI(TAG, "LUT stopped");
+}
+
 bool pid_is_running(void)
 {
     return pid_running;
@@ -87,15 +108,24 @@ bool pid_is_running(void)
 void pid_set_mode(pid_mode_t mode)
 {
     current_mode = mode;
-    const char* mode_str[] = {"OFF", "ON", "LUT_CALIBRATION", "LUT_ACTIVE"};
+    const char* mode_str[] = {"OFF", "ON", "LUT_CALIBRATION", "LUT_ACTIVE", "IDLE_LUT"};
     ESP_LOGI(TAG, "PID mode set to: %s", mode_str[mode]);
     
     if (mode == PID_MODE_OFF) {
         pid_stop();
-    } else if (mode == PID_MODE_ON || mode == PID_MODE_LUT_ACTIVE) {
+        lut_stop();
+    } else if (mode == PID_MODE_ON) {
         pid_start();
+        lut_stop();
+    } else if (mode == PID_MODE_LUT_ACTIVE) {
+        pid_start();
+        lut_start();
+    } else if (mode == PID_MODE_OFF_LUT_ACTIVE) {
+        pid_stop();
+        lut_start();
     } else if (mode == PID_MODE_LUT_CALIBRATION) {
         pid_start();
+        lut_stop();
         lut_clear_ram();
     }
 }
@@ -293,7 +323,7 @@ void pid_task(void *pvParameters)
 
             // 3. Применение LUT (в тиках)
             int32_t corrected_period_ticks = pulse_data.period_ticks;
-            if (current_mode == PID_MODE_LUT_ACTIVE) {
+            if (lut_running) {
                 corrected_period_ticks -= lut_correction[current_pulse_index];
             }
 
@@ -348,6 +378,10 @@ void pid_task(void *pvParameters)
                     else if (pid_output > DAC_MAX) pid_output = DAC_MAX;
                     
                     dac_value = (uint16_t)pid_output;
+
+                     // Считываем ADC ПЕРЕД записью в DAC, чтобы не вносить задержку I2C в цикл
+                    current_adc = adc1_get_raw(ADC1_CHANNEL_6);
+
                     dac_set_value(dac_value);
                     
                     // Логирование каждые 100 итераций (перевод в мкс для читаемости)
@@ -368,6 +402,8 @@ void pid_task(void *pvParameters)
                 t_data.packet_num = packet_num++;
                 t_data.pulse_index = current_pulse_index;
                 t_data.is_zero_mark = pulse_data.is_zero_mark ? 1 : 0;
+                t_data.dac_value = dac_value;      // То, что мы СЕЙЧАС решили подать
+                t_data.adc_value = current_adc;    // То, что мы видим на входе прямо сейчас
 
                 // задаем значение для графика телеметрии в тиках!
                 if (current_tlm == TLM_TYPE_RAW) {
