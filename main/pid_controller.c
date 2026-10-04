@@ -159,6 +159,11 @@ void pid_set_kd(float kd)
     ESP_LOGI(TAG, "Ki changed to: %.6f", kd);
 }
 
+void manual_set_dac(uint16_t dac_manual)
+{
+    dac_value = dac_manual;
+}
+
 float pid_get_ki(void)
 {
     return Ki;
@@ -380,9 +385,9 @@ void pid_task(void *pvParameters)
                     dac_value = (uint16_t)pid_output;
 
                      // Считываем ADC ПЕРЕД записью в DAC, чтобы не вносить задержку I2C в цикл
-                    current_adc = adc1_get_raw(ADC1_CHANNEL_6);
+                    //current_adc = adc1_get_raw(ADC1_CHANNEL_6);
 
-                    dac_set_value(dac_value);
+                    //dac_set_value(dac_value);
                     
                     // Логирование каждые 100 итераций (перевод в мкс для читаемости)
                     if (log_counter++ % 100 == 0) {
@@ -397,6 +402,11 @@ void pid_task(void *pvParameters)
                     }
                 }
 
+                // Считываем ADC ПЕРЕД записью в DAC, чтобы не вносить задержку I2C в цикл
+                current_adc = adc1_get_raw(ADC1_CHANNEL_6);
+
+                dac_set_value(dac_value);
+                
                 // Телеметрия (отправляем тики, plotter переведет в мкс)
                 telemetry_data_t t_data;
                 t_data.packet_num = packet_num++;

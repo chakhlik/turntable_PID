@@ -101,7 +101,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                 char data_buf[32] = {0};
                 memcpy(data_buf, event->data, event->data_len < 31 ? event->data_len : 31);
                 uint16_t set_dac = atoi(data_buf);
-                dac_set_value(set_dac);
+                //dac_set_value(set_dac);
+                manual_set_dac(set_dac);
             } else if (strncmp(event->topic, "turntable/lut_cmd", event->topic_len) == 0) {
                 if (strncmp(event->data, "CLEAR", event->data_len) == 0) {
                     lut_clear_ram();

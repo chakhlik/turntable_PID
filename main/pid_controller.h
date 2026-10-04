@@ -35,8 +35,9 @@ void pid_set_mode(pid_mode_t mode);
 void pid_set_target_speed(uint8_t speed);
 
 void pid_set_ki(float ki);
-void pid_set_kp(float ki);
-void pid_set_kd(float ki);
+void pid_set_kp(float kp);
+void pid_set_kd(float kd);
+void manual_set_dac(uint16_t dac_manual);
 float pid_get_ki(void);
 
 // === Новые функции для LUT ===
