@@ -31,8 +31,8 @@ static bool pid_running = false;
 static bool lut_running = false;
 static float previous_filtered_period_ticks = 0.0f;
 static float Kd = 0.0f; 
-static float Kp = 0.0f;
-static float Ki = 6.0f;  //   *1000
+static float Kp = 0.3f;
+static float Ki = 40.0f;  //   *1000
 
 
 static int32_t integral_term = 0;
@@ -243,13 +243,13 @@ void lut_calculate_and_save(void)
 
     //// 2. Применяем пространственный ФНЧ к ошибке (временно исключено)
     ////    Получаем механическую составляющую ошибки
-    //int32_t e_mech[LUT_SIZE];
-    //spatial_lowpass_filter(e_avg, e_mech, LUT_SIZE, 30);
+    int32_t e_mech[LUT_SIZE];
+    spatial_lowpass_filter(e_avg, e_mech, LUT_SIZE, 72);
 
     // 3. Вычисляем поправку: только ошибка датчика
     //    LUT[i] = полная ошибка - механическая ошибка
     for (int i = 0; i < LUT_SIZE; i++) {
-        int32_t sensor_error = e_avg[i]; // - e_mech[i];
+        int32_t sensor_error = e_avg[i] - e_mech[i];
         lut_correction[i] = (int16_t)sensor_error;
     }
 
@@ -305,8 +305,10 @@ void pid_task(void *pvParameters)
                         }
                         lut_rev_count++;
                         
-                        if (lut_rev_count % 10 == 0) {
+                        if (lut_rev_count % 25 == 0) {
                             ESP_LOGI(TAG, "LUT: %d valid revolutions", lut_rev_count);
+                            
+                            lut_calculate_and_save();
                             led_set_blink(200, 50, 5);
                         }
                     }
