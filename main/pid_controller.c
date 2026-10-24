@@ -67,9 +67,9 @@ void pid_init(void)
     xTelemetryQueue = xQueueCreate(64, sizeof(telemetry_data_t));
 
     // === Инициализация ADC1 для синхронного измерения ===
+    // Настройка ADC1, канал 3 (это GPIO 4 на ESP32-S3)
     adc1_config_width(ADC_WIDTH_BIT_12);
-    // GPIO 34 = ADC1_CHANNEL_6. Attenuation 11dB дает диапазон 0..~3.3В
-    adc1_config_channel_atten(ADC1_CHANNEL_6, ADC_ATTEN_DB_11);
+    adc1_config_channel_atten(ADC1_CHANNEL_3, ADC_ATTEN_DB_11); // Диапазон 0 ~ 3.3В
     ESP_LOGI(TAG, "ADC1 initialized on GPIO 34");
 }
 
@@ -387,7 +387,7 @@ void pid_task(void *pvParameters)
                     dac_value = (uint16_t)pid_output;
 
                      // Считываем ADC ПЕРЕД записью в DAC, чтобы не вносить задержку I2C в цикл
-                    //current_adc = adc1_get_raw(ADC1_CHANNEL_6);
+                    //current_adc = adc1_get_raw(ADC1_CHANNEL_3);
 
                     //dac_set_value(dac_value);
                     
@@ -405,7 +405,7 @@ void pid_task(void *pvParameters)
                 }
 
                 // Считываем ADC ПЕРЕД записью в DAC, чтобы не вносить задержку I2C в цикл
-                current_adc = adc1_get_raw(ADC1_CHANNEL_6);
+                current_adc = adc1_get_raw(ADC1_CHANNEL_3);
 
                 dac_set_value(dac_value);
                 

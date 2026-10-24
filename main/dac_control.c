@@ -5,8 +5,8 @@
 static const char *TAG = "DAC";
 
 #define I2C_MASTER_NUM      I2C_NUM_0
-#define I2C_MASTER_SDA_IO   GPIO_NUM_21
-#define I2C_MASTER_SCL_IO   GPIO_NUM_22
+#define I2C_MASTER_SDA_IO   17  // ESP32-S3-Zero Rx
+#define I2C_MASTER_SCL_IO   18  // ESP32-S3-Zero Tx
 #define I2C_MASTER_FREQ_HZ  400000  // 400 kHz (Fast Mode)
 
 // Адрес MCP4725 (0x60 если пин A0 подключен к GND)

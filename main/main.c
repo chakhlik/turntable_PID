@@ -17,6 +17,7 @@
 #include "led_indicator.h"
 
 static const char *TAG = "MAIN";
+#define CAPTURE_GPIO_NUM    5
 
 void app_main(void)
 {
@@ -62,7 +63,7 @@ void app_main(void)
     // 5. Capture
     // Было: mcpwm_capture_init(GPIO_NUM_19);
     // Стало:
-    gptimer_capture_init(GPIO_NUM_19);
+    gptimer_capture_init(CAPTURE_GPIO_NUM);
     
     // 6. FSM
     fsm_init();
